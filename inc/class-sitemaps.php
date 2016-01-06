@@ -254,6 +254,8 @@ class WPSEO_Sitemaps {
 			return;
 		}
 
+	    error_log("here");
+
 		$this->set_n( get_query_var( 'sitemap_n' ) );
 
 		/**
@@ -265,10 +267,26 @@ class WPSEO_Sitemaps {
 
 		if ( $caching ) {
 			do_action( 'wpseo_sitemap_stylesheet_cache_' . $type, $this );
-			$this->sitemap = get_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n );
+    		$steps  = ( 100 > $this->max_entries ) ? $this->max_entries : 100;
+    		$n      = (int) $this->n;
+    		$offset = ( $n > 1 ) ? ( ( $n - 1 ) * $this->max_entries ) : 0;
+    		$join_filter  = apply_filters( 'wpseo_posts_join', false, $type );
+    		$where_filter = apply_filters( 'wpseo_posts_where', false, $type );
+    		$query = $wpdb->prepare( "SELECT max(post_modified_gmt) FROM ( SELECT ID FROM $wpdb->posts {$join_filter} WHERE post_status = '%s' AND post_password = '' AND post_type = '%s' AND post_date != '0000-00-00 00:00:00' {$where_filter} ORDER BY post_modified ASC LIMIT %d OFFSET %d ) o JOIN $wpdb->posts l ON l.ID = o.ID ORDER BY l.ID",
+				$status, $post_type, $steps, $offset
+			);
+		    $timestamp = $wpdb->get_var( $query );
+			$orig_timestamp = get_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n . "_timestamp");
+			if($orig_timestamp && $orig_timestamp != "" && $orig_timestamp != $timestamp) {
+			    $this->sitemap = "";
+			} else {
+			    $this->sitemap = get_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n );
+			}
+			// ABC
 		}
 
 		if ( ! $this->sitemap || '' == $this->sitemap ) {
+		    error_log("Building sitemap for $type");
 			$this->build_sitemap( $type );
 
 			// 404 for invalid or emtpy sitemaps.
@@ -280,7 +298,8 @@ class WPSEO_Sitemaps {
 			}
 
 			if ( $caching ) {
-				set_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n, $this->sitemap, DAY_IN_SECONDS );
+				set_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n, $this->sitemap, -1 );
+				set_transient( 'wpseo_sitemap_cache_' . $type . '_' . $this->n . "_timestamp", $timestamp, -1);
 			}
 		}
 		else {
@@ -700,8 +719,13 @@ class WPSEO_Sitemaps {
 			$posts = $wpdb->get_results( $query );
 
 			$post_ids = array();
+			$this->max_modified = DateTime($posts[0]->post_modified);
 			foreach ( $posts as $p ) {
 				$post_ids[] = $p->ID;
+				$tdate = DateTime($p->post_modified);
+				if($this->max_modified < $tdate) {
+				    $this->max_modified = $tdate;
+				}
 			}
 			unset( $p );
 
